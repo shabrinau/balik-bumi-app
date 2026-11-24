@@ -48,16 +48,19 @@ EF_KOMPOS = 0.19  # kg CO2e per kg, IPCC (2006)
 EF_BERSIH = EF_TPA - EF_KOMPOS
 EF_TRANSPORT = 0.02  # kg CO2e per kg, asumsi ilustrasi simulasi (tidak ada di proposal)
 
-TARIF_DASAR = 1250  # Rp per kg
+# Tarif berjenjang (Rp/kg, dihitung per tingkat volume bulanan). Sumber: PPT final.
+BATAS_TINGKAT_KG = [400, 1500]
+TARIF_KONTRAK = [1493, 1393, 896]
+TARIF_PROMO = [1598, 1491, 959]
+TARIF_DASAR = TARIF_KONTRAK[0]  # Rp per kg, tingkat pertama kontrak 3 tahun
+JALUR_KONTRAK = "Kontrak 3 tahun (tarif terkunci)"
+JALUR_PROMO = "Tanpa kontrak (tarif promosi)"
 HARGA_KOMPOS = 2000  # Rp per kg
 HARGA_PELET = 4000  # Rp per kg
 HARI_PER_BULAN = 30.4
-INVESTASI_AWAL_JUTA = 99.7
 BATAS_TOLAK = 3.0  # persen
 FAKTOR_BULANAN = [0.55, 0.68, 0.79, 0.88, 0.95, 1.0]
 
-PROMO_GRATIS = "Gratis 2 minggu pertama"
-PROMO_DISKON = "Diskon 50% selama masa pilot (3 bulan)"
 
 HARI_SINGKAT = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"]
 HARI_PANJANG = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
@@ -126,6 +129,10 @@ section[data-testid="stSidebar"] hr { border-color: #2D6A4F; }
 .bb-logo { display: inline-block; width: 30px; height: 30px; border-radius: 50%; background: #2D6A4F; position: relative; }
 .bb-logo::after { content: ''; position: absolute; left: 8px; top: 8px; width: 14px; height: 12px; background: #FAF9F5; border-radius: 0 100% 0 100%; }
 .bb-nav-line { border-bottom: 1px solid #E5E0D8; margin: 8px 0 28px 0; }
+.bb-kecil { font-size: 1.5rem; white-space: nowrap; }
+.bb-tabel-saing { width: 100%; border-collapse: collapse; font-size: 0.9rem; background: #FFFFFF; border: 1px solid #E5E0D8; border-radius: 12px; }
+.bb-tabel-saing th { text-align: left; background: #F5F2EC; color: #44504A; padding: 8px 10px; font-weight: 600; }
+.bb-tabel-saing td { padding: 8px 10px; border-top: 1px solid #EDE9E0; vertical-align: top; color: #2B3A32; }
 .bb-chip { display: inline-block; padding: 6px 14px; border-radius: 999px; background: #D8F3DC; color: #1B4332; font-weight: 600; font-size: 0.85rem; margin-bottom: 14px; }
 .bb-hero-title { font-family: 'Bricolage Grotesque', sans-serif; font-weight: 700; font-size: 3.1rem; line-height: 1.05; color: #1B4332; margin: 0 0 16px 0; letter-spacing: -0.02em; }
 .bb-hero-sub { font-size: 1.1rem; line-height: 1.6; color: #44504A; margin: 0 0 22px 0; max-width: 560px; }
@@ -199,6 +206,17 @@ def juta(x, desimal=1):
     """Format nilai yang sudah dalam satuan juta rupiah."""
     tanda = "-" if x < 0 else ""
     return f"{tanda}Rp{angka(abs(x), desimal)} juta"
+
+
+def biaya_layanan(kg_bulan, kontrak=True):
+    """Biaya layanan per bulan (Rp), dihitung per tingkat volume."""
+    tarif = TARIF_KONTRAK if kontrak else TARIF_PROMO
+    total, bawah = 0.0, 0.0
+    for batas, t in zip(BATAS_TINGKAT_KG + [float("inf")], tarif):
+        kg = max(0.0, min(float(kg_bulan), batas) - bawah)
+        total += kg * t
+        bawah = batas
+    return total
 
 
 def tgl_pendek(d):
@@ -584,66 +602,6 @@ def data_hub_mingguan():
     dapur = total - kopi
     label = [f"Mgg {i}" for i in range(1, 9)]
     return label, kopi, dapur
-
-
-@st.cache_data(show_spinner=False)
-def data_keuangan():
-    volume_bulanan = VOLUME_HARIAN_HUB * HARI_PER_BULAN
-    layanan = volume_bulanan * 0.98 * TARIF_DASAR / 1e6
-    total = layanan / 0.73
-    pelet = total * 0.025
-    kompos = total - layanan - pelet
-    biaya_rincian = [
-        ("Sewa hub", 6.67),
-        ("Upah operator (1 orang dibayar)", 5.21),
-        ("BBM dan perawatan armada", 2.80),
-        ("Bahan pengisi dan kemasan", 2.30),
-        ("Uji mutu dan laboratorium", 1.20),
-        ("Sistem dan dashboard", 0.50),
-        ("Administrasi dan lain-lain", 1.00),
-    ]
-    biaya = sum(x[1] for x in biaya_rincian)
-    jumlah_mitra = [20, 22, 24, 25, 27, 28]
-    pendapatan_seri = [total * m / MITRA_AKTIF for m in jumlah_mitra]
-    biaya_seri = list(np.linspace(17.8, biaya, 6))
-    return {
-        "total": total,
-        "layanan": layanan,
-        "kompos": kompos,
-        "pelet": pelet,
-        "biaya": biaya,
-        "ebitda": total - biaya,
-        "biaya_rincian": biaya_rincian,
-        "bulan": ["Sep", "Okt", "Nov", "Des", "Jan", "Feb"],
-        "pendapatan_seri": pendapatan_seri,
-        "biaya_seri": biaya_seri,
-    }
-
-
-# Titik acuan model keuangan proposal (analisis sensitivitas tarif layanan)
-TITIK_TARIF = [800, 1000, 1250, 1500]
-TITIK_LABA3 = [-104.3, -26.0, 64.1, 151.2]
-TITIK_PENDANAAN = [319.8, 181.8, 156.3, 152.3]
-
-
-def laba_tahun3(tarif):
-    return float(np.interp(tarif, TITIK_TARIF, TITIK_LABA3))
-
-
-def pendanaan_puncak(tarif):
-    return float(np.interp(tarif, TITIK_TARIF, TITIK_PENDANAAN))
-
-
-def payback_bulan(tarif):
-    if tarif < 1225:
-        return None
-    return int(round(float(np.interp(tarif, [1225, 1250, 1500], [36, 32, 23]))))
-
-
-def bep_bulan(tarif):
-    if tarif < 1000:
-        return None
-    return int(round(float(np.interp(tarif, [1000, 1250, 1500], [26, 5, 4]))))
 
 
 # ----------------------------------------------------------------------------
@@ -1151,16 +1109,20 @@ def halaman_landing():
 
     # Tarif dan promo
     h('<div class="bb-bagian">Tarif dan promo pilot</div>')
-    h('<div class="bb-h2">Bayar per kilogram yang kami olah.</div>')
-    contoh_bulanan = 12 * HARI_PER_BULAN * TARIF_DASAR
+    h('<div class="bb-h2">Bayar per kilogram yang kami olah, makin besar volume makin murah.</div>')
+    contoh_kafe = biaya_layanan(12 * HARI_PER_BULAN, True)
+    hotel_kg = 500 * HARI_PER_BULAN
+    hotel_efektif = biaya_layanan(hotel_kg, True) / hotel_kg
     p_kiri, p_kanan = st.columns(2, gap="medium")
     with p_kiri:
         h(
             f"""
-            <div class="bb-gelap"><h4>Biaya layanan dasar</h4>
-            <div class="bb-harga">Rp1.250<span style="font-size:1.2rem;font-weight:500;"> /kg</span></div>
-            <p style="margin-top:12px;">Jauh lebih ringan daripada biaya kelola mandiri (lahan, tenaga, dan alat) serta risiko sanksi
-            ketidakpatuhan. Sebagai contoh, kafe dengan 12 kg per hari membayar sekitar {rupiah(round(contoh_bulanan, -3))} per bulan.</p>
+            <div class="bb-gelap"><h4>Tarif berjenjang per kg</h4>
+            <div class="bb-harga">Rp1.493<span style="font-size:1.2rem;font-weight:500;"> /kg</span></div>
+            <p style="margin-top:8px;">Kontrak 3 tahun, 0 sampai 400 kg per bulan. Tarif dihitung per tingkat: Rp1.393 untuk
+            401 sampai 1.500 kg dan Rp896 untuk di atas 1.500 kg. Tanpa kontrak (tarif promosi): Rp1.598, Rp1.491, dan Rp959.</p>
+            <p style="margin-top:8px;">Contoh: kafe 12 kg per hari sekitar {rupiah(round(contoh_kafe, -3))} per bulan. Hotel 500 kg per hari
+            efektif sekitar {rupiah(round(hotel_efektif))} per kg.</p>
             <p style="margin-top:8px;">Sudah termasuk bin berlabel QR, jemput terjadwal Senin, Kamis, Sabtu, penimbangan digital, dan laporan bulanan.</p></div>
             """
         )
@@ -1168,9 +1130,10 @@ def halaman_landing():
         h(
             f"""
             <div class="bb-card" style="border:2px solid {AMBER};"><span class="bb-badge bb-badge-amber">Promo Pilot</span>
-            <h4 style="margin-top:12px;font-size:1.5rem;">Gratis 2 minggu pertama atau diskon 50%</h4>
-            <p>Bagian dari program validasi pilot 3 bulan untuk 10 mitra pertama di Bandung. Pilot menguji kesediaan membayar,
-            volume per mitra, dan rendemen kompos sebelum perluasan ke 55 mitra pada bulan ke-24.</p></div>
+            <h4 style="margin-top:12px;font-size:1.5rem;">Diskon 50% di 3 bulan pertama</h4>
+            <p>Untuk 10 mitra pilot pertama di Bandung. Pilot menguji kesediaan membayar, volume per mitra, dan rendemen kompos
+            sebelum perluasan ke 55 mitra pada bulan ke-24.</p>
+            <p style="margin-top:8px;">Kontrak 3 tahun: tarif lebih murah, jadwal tetap, dan tong khusus anti bau.</p></div>
             """
         )
 
@@ -1218,7 +1181,7 @@ def form_pendaftaran():
         volume = c1.number_input(
             "Estimasi Volume Sisa Pangan (kg/hari)", min_value=1, max_value=1000, value=20, step=1,
         )
-        promo = c2.radio("Pilihan Promo Pilot", [PROMO_GRATIS, PROMO_DISKON])
+        promo = c2.radio("Jalur Harga (diskon pilot 50% di 3 bulan pertama)", [JALUR_KONTRAK, JALUR_PROMO])
         setuju = st.checkbox(
             "Kami bersedia memilah ampas kopi dan sisa dapur di sumber serta mengikuti evaluasi pilot 3 bulan."
         )
@@ -1242,11 +1205,8 @@ def form_pendaftaran():
         return
 
     bulanan_kg = volume * HARI_PER_BULAN
-    biaya_normal = bulanan_kg * TARIF_DASAR
-    if promo == PROMO_GRATIS:
-        biaya_pilot = biaya_normal * 3 - volume * 14 * TARIF_DASAR
-    else:
-        biaya_pilot = biaya_normal * 3 * 0.5
+    biaya_normal = biaya_layanan(bulanan_kg, promo == JALUR_KONTRAK)
+    biaya_pilot = biaya_normal * 3 * 0.5
     hemat = biaya_normal * 3 - biaya_pilot
     layak = bulanan_kg * (1 - BATAS_TOLAK / 100)
     co2_bulanan = layak * EF_BERSIH
@@ -1261,7 +1221,7 @@ def form_pendaftaran():
     ringkasan = pd.DataFrame(
         {
             "Ringkasan pendaftaran": [
-                "Nama usaha", "Jenis usaha", "Penanggung jawab", "WhatsApp", "Lokasi", "Volume", "Promo dipilih",
+                "Nama usaha", "Jenis usaha", "Penanggung jawab", "WhatsApp", "Lokasi", "Volume", "Jalur harga",
             ],
             "Isian": [
                 nama_usaha.strip(), jenis, nama_pic.strip(), wa.strip(),
@@ -1273,9 +1233,9 @@ def form_pendaftaran():
     tabel(ringkasan)
     s1, s2, s3 = st.columns(3)
     with s1:
-        h(kartu_metrik("Biaya layanan normal per bulan", rupiah(biaya_normal), f"{angka(bulanan_kg, 0)} kg × Rp1.250/kg"))
+        h(kartu_metrik("Biaya layanan normal per bulan", rupiah(biaya_normal), f"{angka(bulanan_kg, 0)} kg, efektif Rp{angka(biaya_normal / bulanan_kg, 0)}/kg (tarif berjenjang)"))
     with s2:
-        h(kartu_metrik("Estimasi biaya 3 bulan pilot", rupiah(biaya_pilot), f"Penghematan promo {rupiah(hemat)}", warna=AMBER))
+        h(kartu_metrik("Estimasi biaya 3 bulan pilot", rupiah(biaya_pilot), f"Diskon pilot 50%, hemat {rupiah(hemat)}", warna=AMBER))
     with s3:
         h(kartu_metrik("CO₂e bersih dihindari per bulan", f"{angka(co2_bulanan, 0)} kg", "Asumsi 3% bahan ditolak, faktor EPA dan IPCC"))
     st.caption("Simulasi ini hanya ilustrasi dan tidak menyimpan data pendaftaran.")
@@ -1587,8 +1547,8 @@ def halaman_operasional():
         """
     )
 
-    tab_beranda, tab_rute, tab_produksi, tab_keuangan = st.tabs(
-        ["Beranda", "Rute & Jemput", "Produksi", "Keuangan & Sensitivitas"]
+    tab_beranda, tab_rute, tab_produksi, tab_keuangan, tab_tim = st.tabs(
+        ["Beranda", "Rute & Jemput", "Produksi", "Keuangan", "🔒 Ruang Tim"]
     )
 
     with tab_beranda:
@@ -1741,139 +1701,242 @@ def halaman_operasional():
         st.caption("Uji mutu tiap batch: kadar air, pH, rasio C/N, benda asing, dan logam berat dengan acuan SNI 19-7030-2004.")
 
     with tab_keuangan:
-        k = data_keuangan()
-        f1, f2, f3, f4 = st.columns(4, gap="medium")
-        with f1:
-            h(kartu_metrik("Pendapatan bulanan", juta(k["total"]),
-                           f"Layanan 73% · kompos {angka(k['kompos'] / k['total'] * 100, 1)}% · pelet {angka(k['pelet'] / k['total'] * 100, 1)}%"))
-        with f2:
-            h(kartu_metrik("Biaya operasional", juta(k["biaya"]), "Sewa hub, upah, armada, bahan, sistem", warna=KOPI))
-        with f3:
-            h(kartu_metrik("EBITDA bulanan", juta(k["ebitda"]), "Pendapatan dikurangi biaya operasional", warna=HUTAN, latar="#D8F3DC"))
-        with f4:
-            h(kartu_metrik("Tarif dasar layanan", "Rp1.250/kg", "Asumsi 98% tertagih", warna=AMBER))
+        k1, k2, k3, k4, k5 = st.columns(5, gap="medium")
+        with k1:
+            h(kartu_metrik("Investasi awal", '<span class="bb-kecil">±Rp141 jt</span>', "Armada, mesin, area kompos, deposit", warna=KOPI))
+        with k2:
+            h(kartu_metrik("BEP operasional", '<span class="bb-kecil">Bulan 10</span>', "Skenario dasar", warna=HUTAN, latar="#D8F3DC"))
+        with k3:
+            h(kartu_metrik("Payback", '<span class="bb-kecil">Bulan 32</span>', "Kas kumulatif kembali positif", warna=HUTAN, latar="#D8F3DC"))
+        with k4:
+            h(kartu_metrik("Dana puncak", '<span class="bb-kecil">±Rp235 jt</span>', "Bulan 11, sudah memuat modal kerja Rp22,6 jt", warna=AMBER))
+        with k5:
+            h(kartu_metrik("ROI tahun ke-3", '<span class="bb-kecil">±57%</span>', "Laba tahun 3 Rp120,3 jt ÷ total dana Rp212,2 jt"))
         st.write("")
-        c_kiri, c_kanan = st.columns([1.5, 1], gap="medium")
+        tahun = ["Tahun 1", "Tahun 2", "Tahun 3"]
+        pendapatan = [218.5, 577.6, 751.9]
+        biaya_op = [236.9, 432.8, 589.3]
+        ebitda = [-18.3, 144.8, 162.6]
+        laba = [-37.6, 111.0, 120.3]
+        kas = [-90.1, 135.7, 147.8]
+        c_kiri, c_kanan = st.columns([1.3, 1], gap="medium")
         with c_kiri:
             fig = go.Figure()
-            fig.add_bar(
-                name="Pendapatan", x=k["bulan"], y=np.round(k["pendapatan_seri"], 1), marker_color=DAUN,
-                hovertemplate="%{x}<br>Pendapatan: Rp%{y:,.1f} juta<extra></extra>",
-            )
-            fig.add_bar(
-                name="Biaya operasional", x=k["bulan"], y=np.round(k["biaya_seri"], 1), marker_color=KOPI,
-                hovertemplate="%{x}<br>Biaya: Rp%{y:,.1f} juta<extra></extra>",
-            )
-            ebitda_seri = np.array(k["pendapatan_seri"]) - np.array(k["biaya_seri"])
-            fig.add_trace(
-                go.Scatter(
-                    name="EBITDA", x=k["bulan"], y=np.round(ebitda_seri, 1), mode="lines+markers",
-                    line=dict(color=AMBER, width=3), marker=dict(size=8),
-                    hovertemplate="%{x}<br>EBITDA: Rp%{y:,.1f} juta<extra></extra>",
-                )
-            )
+            fig.add_bar(name="Pendapatan", x=tahun, y=pendapatan, marker_color=DAUN,
+                        hovertemplate="%{x}<br>Pendapatan: Rp%{y:,.1f} juta<extra></extra>")
+            fig.add_bar(name="Biaya operasional", x=tahun, y=biaya_op, marker_color=KOPI,
+                        hovertemplate="%{x}<br>Biaya: Rp%{y:,.1f} juta<extra></extra>")
+            fig.add_trace(go.Scatter(
+                name="Laba bersih", x=tahun, y=laba, mode="lines+markers",
+                line=dict(color=AMBER, width=3), marker=dict(size=9),
+                hovertemplate="%{x}<br>Laba bersih: Rp%{y:,.1f} juta<extra></extra>"))
+            fig.add_hline(y=0, line_dash="dash", line_color=BORDER)
             fig.update_layout(barmode="group", yaxis_title="Juta rupiah")
-            grafik(gaya(fig, "Pendapatan vs biaya, 6 bulan terakhir (Sep 2027 - Feb 2028)"), "ops_keuangan")
+            grafik(gaya(fig, "Proyeksi keuangan skenario dasar (Rp juta per tahun)"), "ops_keu_tahun")
         with c_kanan:
-            donat = go.Figure(
-                go.Pie(
-                    labels=["Biaya layanan (Rp1.250/kg)", "Kompos (Rp2.000/kg)", "Pelet (Rp4.000/kg)"],
-                    values=[k["layanan"], k["kompos"], k["pelet"]],
-                    hole=0.55, marker=dict(colors=[DAUN, KOPI, AMBER]), sort=False,
-                    textinfo="percent", hovertemplate="%{label}<br>Rp%{value:,.1f} juta<extra></extra>",
-                )
-            )
-            grafik(gaya(donat, "Komposisi pendapatan bulanan"), "ops_donat")
-        with st.expander("Rincian biaya operasional bulanan"):
-            tabel(pd.DataFrame(
-                [(nama, juta(nilai, 2)) for nama, nilai in k["biaya_rincian"]] + [("Total biaya operasional", juta(k["biaya"], 2))],
-                columns=["Komponen biaya", "Nilai per bulan"],
-            ))
+            def fmt(v):
+                return ("−" if v < 0 else "") + angka(abs(v), 1)
+            tabel(pd.DataFrame({
+                "Rp juta": ["Pendapatan", "Biaya operasional", "EBITDA", "Laba bersih", "Arus kas bersih"],
+                "Tahun 1": [fmt(v[0]) for v in (pendapatan, biaya_op, ebitda, laba, kas)],
+                "Tahun 2": [fmt(v[1]) for v in (pendapatan, biaya_op, ebitda, laba, kas)],
+                "Tahun 3": [fmt(v[2]) for v in (pendapatan, biaya_op, ebitda, laba, kas)],
+            }))
+            st.caption("Akumulasi laba bersih 3 tahun Rp193,6 juta. Total gaji lapangan ±Rp526 juta selama 36 bulan sudah masuk biaya operasional.")
 
-        # Simulator sensitivitas tarif
-        h('<div class="bb-bagian" style="margin-top:30px;">Simulator sensitivitas tarif</div>')
-        h('<div class="bb-h2" style="font-size:1.6rem;">Seberapa sensitif kelayakan usaha terhadap tarif layanan?</div>')
-        tarif = st.slider(
-            "Tarif layanan (Rp/kg)", min_value=900, max_value=1500, value=1250, step=25, format="Rp%d", key="tarif_sim",
-        )
-        laba3 = laba_tahun3(tarif)
-        roi = laba3 / INVESTASI_AWAL_JUTA * 100
-        payback = payback_bulan(tarif)
-        bep = bep_bulan(tarif)
-        pendanaan = pendanaan_puncak(tarif)
-        sm1, sm2, sm3, sm4 = st.columns(4, gap="medium")
-        with sm1:
-            h(kartu_metrik("Laba bersih tahun ke-3", juta(laba3),
-                           "Proyeksi model proposal", warna=HUTAN if laba3 >= 0 else AMBER,
-                           latar="#D8F3DC" if laba3 >= 0 else "#FEF3C7"))
-        with sm2:
-            h(kartu_metrik("ROI tahun ke-3", f"{angka(roi, 0)}%", f"Laba tahun ke-3 ÷ investasi awal {juta(INVESTASI_AWAL_JUTA)}"))
-        with sm3:
-            h(kartu_metrik("Pengembalian modal (payback)", f"Bulan ke-{payback}" if payback else "Lebih dari 36 bulan",
-                           "Horizon model 36 bulan", warna=KOPI))
-        with sm4:
-            h(kartu_metrik("Kebutuhan pendanaan puncak", juta(pendanaan),
-                           f"Titik impas operasional: bulan ke-{bep}" if bep else "Titik impas operasional: belum tercapai", warna=AMBER))
-        if laba3 < 0:
-            st.error(
-                f"Pada tarif {rupiah(tarif)}/kg usaha merugi {juta(abs(laba3))} di tahun ke-3 dan modal belum kembali dalam 36 bulan. "
-                f"Modal baru kembali dalam 36 bulan mulai sekitar Rp1.225/kg."
-            )
-        elif tarif == 1250:
-            st.success(
-                "Pada tarif dasar Rp1.250/kg: laba bersih tahun ke-3 Rp64,1 juta, ROI 64%, titik impas operasional bulan ke-5, "
-                "dan pengembalian modal pada bulan ke-32."
-            )
-        else:
-            st.info(
-                f"Pada tarif {rupiah(tarif)}/kg proyeksi laba bersih tahun ke-3 adalah {juta(laba3)} dengan ROI {angka(roi, 0)}%."
-            )
-
-        rentang = np.arange(900, 1501, 10)
-        kurva = [laba_tahun3(t) for t in rentang]
-        fig_s = go.Figure()
-        fig_s.add_trace(
-            go.Scatter(
-                x=rentang, y=np.round(kurva, 1), mode="lines", name="Laba bersih tahun ke-3 (interpolasi)",
-                line=dict(color=DAUN, width=3),
-                hovertemplate="Rp%{x:,.0f}/kg<br>Laba tahun ke-3: Rp%{y:,.1f} juta<extra></extra>",
-            )
-        )
-        acuan_x = [t for t in TITIK_TARIF if 900 <= t <= 1500]
-        acuan_y = [l for t, l in zip(TITIK_TARIF, TITIK_LABA3) if 900 <= t <= 1500]
-        fig_s.add_trace(
-            go.Scatter(
-                x=acuan_x, y=acuan_y, mode="markers", name="Skenario acuan proposal",
-                marker=dict(color=KOPI, size=11, symbol="diamond"),
-                hovertemplate="Rp%{x:,.0f}/kg<br>Laba tahun ke-3: Rp%{y:,.1f} juta<extra></extra>",
-            )
-        )
-        fig_s.add_trace(
-            go.Scatter(
-                x=[tarif], y=[round(laba3, 1)], mode="markers", name="Tarif terpilih",
-                marker=dict(color=AMBER, size=16, line=dict(color="#FFFFFF", width=2)),
-                hovertemplate="Rp%{x:,.0f}/kg<br>Laba tahun ke-3: Rp%{y:,.1f} juta<extra></extra>",
-            )
-        )
-        fig_s.add_hline(y=0, line_dash="dash", line_color=KOPI)
-        fig_s.update_layout(xaxis_title="Tarif layanan (Rp/kg)", yaxis_title="Laba bersih tahun ke-3 (juta Rp)")
-        grafik(gaya(fig_s, "Dampak tarif layanan terhadap laba bersih tahun ke-3", tinggi=380), "ops_sensitivitas")
-
-        h('<div style="font-weight:600;color:#1B4332;margin:4px 0 6px 0;">Skenario acuan dari model keuangan proposal</div>')
-        acuan = pd.DataFrame(
-            {
-                "Tarif layanan": ["Rp800/kg", "Rp1.000/kg", "Rp1.250/kg (dasar)", "Rp1.500/kg"],
-                "Titik impas (BEP)": ["Tidak tercapai", "Bulan ke-26", "Bulan ke-5", "Bulan ke-4"],
-                "Payback": ["Lebih dari 36 bulan", "Lebih dari 36 bulan", "Bulan ke-32", "Bulan ke-23"],
-                "Pendanaan puncak": ["Rp319,8 juta", "Rp181,8 juta", "Rp156,3 juta", "Rp152,3 juta"],
-                "Laba bersih tahun ke-3": ["-Rp104,3 juta", "-Rp26,0 juta", "Rp64,1 juta", "Rp151,2 juta"],
-            }
-        )
-        tabel(acuan)
+        h('<div class="bb-bagian" style="margin-top:26px;">Ketahanan terhadap risiko</div>')
+        h('<div style="font-weight:600;color:#1B4332;margin:4px 0 6px 0;">Seberapa sensitif hasil terhadap tarif, volume, dan biaya?</div>')
+        tabel(pd.DataFrame({
+            "Skenario": [
+                "Tarif kontrak turun 10%",
+                "Batas bawah tarif kontrak kafe",
+                "Volume resto dan hotel 30 kg/hari (asumsi 41)",
+                "Biaya naik 5% per tahun, tarif terkunci 3 tahun",
+                "Tanpa pelet (regulasi belum jelas)",
+            ],
+            "Dampak": [
+                "Payback lewat 36 bulan",
+                "±Rp1.426/kg. Turun lebih dari 4,5%, payback lewat 36 bulan",
+                "Payback lewat 36 bulan",
+                "Kas bulan 36 turun Rp21 juta",
+                "Payback tetap ±bulan 32",
+            ],
+        }))
         st.caption(
-            "Nilai di antara skenario acuan dihitung dengan interpolasi linier sebagai simulasi. Rp1.250/kg dipilih sebagai tarif dasar "
-            "dan akan divalidasi melalui pilot 3 bulan dengan 10 mitra."
+            "Asumsi: tarif kontrak Rp1.493 / 1.393 / 896 per kg, diskon pilot 50% bulan 1–3, pengurus tanpa honor. "
+            "Tarif final ditetapkan setelah wawancara kesediaan membayar dan pilot."
         )
+
+    with tab_tim:
+        ruang_tim()
+
+
+def _kata_sandi_tim():
+    try:
+        return str(st.secrets["RUANG_TIM_SANDI"])
+    except Exception:
+        return "balikbumi2027"
+
+
+def _kunci_tim():
+    st.session_state["tim_terbuka"] = False
+
+
+def ruang_tim():
+    if not st.session_state.get("tim_terbuka"):
+        h(
+            f"""
+            <div class="bb-card" style="max-width:560px;border-top:4px solid {KOPI};">
+            <div style="font-size:2rem;">🔒</div>
+            <h4 style="margin-top:6px;">Ruang Tim</h4>
+            <p>Khusus tiga pendiri Balik Bumi: materi strategi, pasar, tarif, dan pendanaan. Masukkan kata sandi untuk membuka.</p></div>
+            """
+        )
+        with st.form("form_tim"):
+            sandi = st.text_input("Kata sandi", type="password")
+            masuk = st.form_submit_button("Buka Ruang Tim", type="primary")
+        if masuk:
+            import hmac
+            if hmac.compare_digest(sandi.encode("utf-8"), _kata_sandi_tim().encode("utf-8")):
+                st.session_state["tim_terbuka"] = True
+                st.rerun()
+            else:
+                st.error("Kata sandi salah.")
+        return
+
+    atas = st.columns([4, 1.2])
+    with atas[0]:
+        h('<span class="bb-badge bb-badge-amber">🔒 Internal: hanya pendiri</span>')
+    with atas[1]:
+        st.button("Kunci kembali", key="tim_kunci", on_click=_kunci_tim)
+    st.write("")
+
+    t_saing, t_pasar, t_tarif, t_dana = st.tabs(["Keunggulan vs pesaing", "Pasar", "Tarif berjenjang", "Struktur pendanaan"])
+
+    # 1. Keunggulan vs pesaing
+    with t_saing:
+        h('<div class="bb-h2" style="font-size:1.6rem;">Pesaing dan respons Balik Bumi</div>')
+        pesaing = [
+            ("Waste4Change", "Langsung", "B2B di 19–21 kota; ada pusat pemulihan material di Bandung",
+             "Fokus layanan organik lokal, rute padat, tarif berjenjang"),
+            ("Pemkot Bandung (DLH, rumah maggot)", "Langsung / mitra", "Rumah maggot dan TPS Gedebage, tetapi pelaku usaha diminta mengelola mandiri",
+             "Jadi mitra: tampung overflow dan beli produk"),
+            ("Pegiat maggot (Magalarva, Biomagg, komunitas Bandung)", "Tidak langsung", "Berbasis Bogor dan Depok serta komunitas lokal; ada keluhan bau",
+             "Fase 2 dengan SOP bau; kemitraan overflow"),
+            ("Plastavfall, Rekosistem", "Tidak langsung", "Daur ulang anorganik; Plastavfall sudah punya jemput berlangganan untuk komersial",
+             "Fokus organik; potensi kerja sama"),
+            ("Kelola mandiri (hotel besar)", "Substitusi", "Mengolah sendiri", "Paket Resto &amp; Hotel dengan laporan"),
+        ]
+        baris = "".join(
+            f"<tr><td><b>{a}</b></td><td>{b}</td><td>{c}</td><td style='color:#1B4332;font-weight:600;'>{d}</td></tr>"
+            for a, b, c, d in pesaing
+        )
+        h(f"<table class='bb-tabel-saing'><tr><th>Pesaing</th><th>Jenis</th><th>Posisi mereka</th><th>Respons Balik Bumi</th></tr>{baris}</table>")
+        st.caption("Referensi global: Reground, Compost RVA (diskon volume), Winnow, TreeDots.")
+        h('<div class="bb-h2" style="font-size:1.6rem;margin-top:18px;">Cara kami unggul</div>')
+        u1, u2, u3 = st.columns(3, gap="medium")
+        keunggulan = [
+            ("1", "Dua paket, tarif berjenjang", "Kafe kecil masuk dengan biaya ringan dan pilot. Resto dan hotel mendapat harga volume dan laporan."),
+            ("2", "Layanan lokal yang andal", "Rute padat tiga kali per minggu, bin QR, timbang digital. Ampas kopi relatif homogen sehingga olahan konsisten."),
+            ("3", "Kemitraan, bukan perang", "PHRI Jabar untuk akses hotel, DLH untuk legitimasi, rumah maggot untuk menampung overflow."),
+        ]
+        for kolom, (no, judul, isi) in zip((u1, u2, u3), keunggulan):
+            with kolom:
+                h(f'<div class="bb-card"><div class="bb-angka-langkah">KEUNGGULAN {no}</div><h4>{judul}</h4><p>{isi}</p></div>')
+        st.caption("Laporan CO₂e adalah nilai tambah untuk mitra besar, bukan alasan utama kafe memilih Balik Bumi.")
+
+    # 2. Pasar
+    with t_pasar:
+        h('<div class="bb-h2" style="font-size:1.6rem;">Pasar luas, target kami 55 mitra</div>')
+        p1, p2, p3 = st.columns(3, gap="medium")
+        with p1:
+            h(kartu_metrik("TAM", "874 ton/hari", "Seluruh sampah organik kawasan komersial Bandung. Rp464 M per tahun secara teoretis", warna=KOPI))
+        with p2:
+            h(kartu_metrik("SAM", "131,1 ton/hari", "Horeka dalam jangkauan rute hub, ≥10 kg/hari, mau memilah. Rp70 M per tahun", warna=DAUN))
+        with p3:
+            h(kartu_metrik("SOM", "1,095 ton/hari", "Target realistis bulan 24: 55 mitra. Rp581 juta per tahun, 0,84% dari SAM", warna=HUTAN, latar="#D8F3DC"))
+        st.write("")
+        q1, q2, q3 = st.columns(3, gap="medium")
+        with q1:
+            h(f'<div class="bb-card"><span class="bb-badge bb-badge-hijau">Paket Kafe</span><h4 style="margin-top:10px;">40 kafe spesialti</h4><p>±12 kg per hari. Tarif Rp1.493/kg lewat kontrak, masuk dengan biaya ringan dan pilot.</p></div>')
+        with q2:
+            h(f'<div class="bb-card"><span class="bb-badge bb-badge-amber">Paket Resto &amp; Hotel</span><h4 style="margin-top:10px;">15 resto dan hotel</h4><p>Rata-rata ±41 kg per hari. Tarif turun per volume, hotel 500 kg/hari efektif ±Rp948/kg.</p></div>')
+        with q3:
+            h(f'<div class="bb-card"><span class="bb-badge bb-badge-abu">Pembeli produk</span><h4 style="margin-top:10px;">Petani, toko tanaman, Pemkot</h4><p>Kompos Rp2.000/kg. Pelet uji coba Rp4.000/kg.</p></div>')
+        fig = go.Figure(go.Bar(
+            x=["Bulan 3", "Bulan 6", "Bulan 12", "Bulan 18", "Bulan 24"], y=[10, 16, 29, 42, 55],
+            marker_color=DAUN, text=[10, 16, 29, 42, 55], textposition="outside",
+            hovertemplate="%{x}<br>%{y} mitra aktif<extra></extra>",
+        ))
+        fig.update_layout(yaxis_title="Mitra aktif", yaxis_range=[0, 65])
+        grafik(gaya(fig, "Target mitra aktif: ±2 mitra baru per bulan (40 kafe + 15 resto/hotel)", tinggi=320), "tim_mitra")
+
+    # 3. Tarif berjenjang
+    with t_tarif:
+        h('<div class="bb-h2" style="font-size:1.6rem;">Dua jalur harga, dihitung per tingkat (Rp per kg)</div>')
+        tabel(pd.DataFrame({
+            "Volume per bulan": ["0–400 kg", "401–1.500 kg", "Di atas 1.500 kg"],
+            "Kontrak 3 tahun (terkunci)": [f"Rp{angka(t, 0)}" for t in TARIF_KONTRAK],
+            "Tanpa kontrak (promosi)": [f"Rp{angka(t, 0)}" for t in TARIF_PROMO],
+        }))
+        st.caption("Pilot 10 mitra: diskon 50% di 3 bulan pertama. Kontrak 3 tahun: tarif lebih murah, jadwal tetap, tong khusus anti bau.")
+        h('<div style="font-weight:600;color:#1B4332;margin:14px 0 6px 0;">Kalkulator tarif</div>')
+        kg_hari = st.slider("Volume sisa pangan (kg per hari)", 5, 600, 12, 1, key="tim_kg_hari")
+        kg_bulan = kg_hari * HARI_PER_BULAN
+        b_kontrak = biaya_layanan(kg_bulan, True)
+        b_promo = biaya_layanan(kg_bulan, False)
+        r1, r2, r3 = st.columns(3, gap="medium")
+        with r1:
+            h(kartu_metrik("Kontrak 3 tahun", rupiah(round(b_kontrak, -3)) + "/bln", f"Efektif ±Rp{angka(b_kontrak / kg_bulan, 0)}/kg", warna=HUTAN, latar="#D8F3DC"))
+        with r2:
+            h(kartu_metrik("Tanpa kontrak", rupiah(round(b_promo, -3)) + "/bln", f"Efektif ±Rp{angka(b_promo / kg_bulan, 0)}/kg", warna=AMBER))
+        with r3:
+            h(kartu_metrik("Selisih per tahun", rupiah(round((b_promo - b_kontrak) * 12, -3)), "Penghematan jika kontrak 3 tahun", warna=KOPI))
+        h(
+            f"""
+            <div class="bb-card" style="margin-top:14px;border-left:4px solid {AMBER};">
+            <b>Batas bawah tarif ±Rp1.426/kg.</b> Tarif kontrak kafe turun lebih dari 4,5% membuat payback melewati 36 bulan.
+            Tarif final menunggu wawancara kesediaan membayar (5–10 kafe dan resto) dan pilot.</div>
+            """
+        )
+
+    # 4. Struktur pendanaan
+    with t_dana:
+        h('<div class="bb-h2" style="font-size:1.6rem;">Struktur pendanaan: mencari investor</div>')
+        d1, d2, d3 = st.columns(3, gap="medium")
+        with d1:
+            h(kartu_metrik("Tahap 1: sebelum operasi", "±Rp141 jt", "Armada, mesin, area kompos, deposit", warna=KOPI))
+        with d2:
+            h(kartu_metrik("Tahap 2: bulan 4–11", "±Rp94 jt", "Pelet, Viar, deposit, dan modal kerja", warna=AMBER))
+        with d3:
+            h(kartu_metrik("Dana puncak (bulan 11)", "±Rp235 jt", "Tahap 1 + tahap 2; titik terendah kas", warna=HUTAN, latar="#D8F3DC"))
+        fig = go.Figure()
+        fig.add_bar(name="Tahap 1 (sebelum operasi)", y=["Kebutuhan dana"], x=[141], orientation="h", marker_color=KOPI,
+                    text=["±Rp141 jt"], textposition="inside",
+                    hovertemplate="Tahap 1: Rp141 juta<extra></extra>")
+        fig.add_bar(name="Tahap 2 (bulan 4–11)", y=["Kebutuhan dana"], x=[94], orientation="h", marker_color=AMBER,
+                    text=["±Rp94 jt"], textposition="inside",
+                    hovertemplate="Tahap 2: Rp94 juta<extra></extra>")
+        fig.update_layout(barmode="stack", xaxis_title="Juta rupiah", yaxis=dict(showticklabels=False))
+        gaya(fig, "Dua tahap pendanaan, total ±Rp235 juta", tinggi=300)
+        fig.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.45, xanchor="left", x=0, traceorder="normal"))
+        grafik(fig, "tim_dana")
+        e1, e2 = st.columns(2, gap="medium")
+        with e1:
+            h(
+                f"""
+                <div class="bb-card"><h4>Yang didapat investor</h4>
+                <p>BEP operasional bulan 10, modal kembali (payback) bulan 32, ROI tahun ke-3 ±57%, akumulasi laba bersih 3 tahun Rp193,6 juta.</p></div>
+                """
+            )
+        with e2:
+            h(
+                f"""
+                <div class="bb-card"><h4>Komitmen pendiri</h4>
+                <p>Honor pengurus <b>Rp0 sampai modal investor kembali</b> (bulan 32). Setelah itu honor Rp2 juta per orang per bulan, dibayar sebelum pembagian laba.
+                Gaji tenaga lapangan penuh (UMK + 10%) sudah masuk biaya operasional.</p></div>
+                """
+            )
 
 
 # ----------------------------------------------------------------------------
